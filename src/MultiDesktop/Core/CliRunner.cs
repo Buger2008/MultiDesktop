@@ -8,18 +8,13 @@ namespace MultiDesktop.Core
     /// 满血版命令行入口。设计目标：适合 AI 与 GUI 稳定调用 ——
     /// 子命令 + 具名选项、结构化 JSON 输出、稳定退出码、数据与提示分离。
     /// 不依赖 WinForms：全部业务逻辑来自 Core 服务层。
+    ///
+    /// JSON 输出基于 Utf8JsonWriter 手工写入，不使用反射式序列化，
+    /// 以保证 NativeAOT 下可用（见 JsonBuffer 的说明）。
     /// </summary>
     public static class CliRunner
     {
         public const string Version = "1.3.6.0";
-
-        private static readonly JsonSerializerOptions JsonOpts = new()
-        {
-            WriteIndented = true,
-            // 不转义中文，便于 AI 与人工直接阅读
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        };
 
         // ==================================================================
         //  入口
@@ -66,12 +61,15 @@ namespace MultiDesktop.Core
         //  输出
         // ==================================================================
 
-        private static int Emit(CliArgs a, OperationResult r)
+        /// <summary>
+        /// 统一输出：--json 时输出 JSON（未显式提供时用 {success, message} 基本形态），
+        /// 否则成功写标准输出、失败写标准错误。
+        /// </summary>
+        private static int Emit(CliArgs a, OperationResult r, string? json = null)
         {
             if (a.Has("--json"))
             {
-                Console.Out.WriteLine(JsonSerializer.Serialize(
-                    new { success = r.Success, message = r.Message, data = r.Data }, JsonOpts));
+                Console.Out.WriteLine(json ?? JsonBasic(r.Success, r.Message));
             }
             else if (r.Success)
             {
@@ -87,16 +85,201 @@ namespace MultiDesktop.Core
         }
 
         // ==================================================================
+        //  JSON 构造（零反射）
+        // ==================================================================
+
+        private static string JsonBasic(bool success, string message)
+        {
+            using var jb = new JsonBuffer();
+            var w = jb.Writer;
+            w.WriteStartObject();
+            w.WriteBoolean("success", success);
+            w.WriteString("message", message);
+            w.WriteEndObject();
+            return jb.Complete();
+        }
+
+        private static string JsonAdd(bool success, string message, string name, string path, bool encrypted)
+        {
+            using var jb = new JsonBuffer();
+            var w = jb.Writer;
+            w.WriteStartObject();
+            w.WriteBoolean("success", success);
+            w.WriteString("message", message);
+            w.WriteString("name", name);
+            w.WriteString("path", path);
+            w.WriteBoolean("encrypted", encrypted);
+            w.WriteEndObject();
+            return jb.Complete();
+        }
+
+        private static string JsonSwitch(bool success, string message, string name, string path, string? warning)
+        {
+            using var jb = new JsonBuffer();
+            var w = jb.Writer;
+            w.WriteStartObject();
+            w.WriteBoolean("success", success);
+            w.WriteString("message", message);
+            w.WriteString("switched", name);
+            w.WriteString("path", path);
+            if (warning == null) w.WriteNull("warning");
+            else w.WriteString("warning", warning);
+            w.WriteEndObject();
+            return jb.Complete();
+        }
+
+        private static string JsonPassword(bool success, string message, string name, bool? encrypted)
+        {
+            using var jb = new JsonBuffer();
+            var w = jb.Writer;
+            w.WriteStartObject();
+            w.WriteBoolean("success", success);
+            w.WriteString("message", message);
+            w.WriteString("name", name);
+            if (encrypted == null) w.WriteNull("encrypted");
+            else w.WriteBoolean("encrypted", encrypted.Value);
+            w.WriteEndObject();
+            return jb.Complete();
+        }
+
+        private static string JsonSkills(bool success, string message, SkillInstallInfo? info)
+        {
+            using var jb = new JsonBuffer();
+            var w = jb.Writer;
+            w.WriteStartObject();
+            w.WriteBoolean("success", success);
+            w.WriteString("message", message);
+            if (info == null)
+            {
+                w.WriteNull("skillDir");
+                w.WriteNull("exeDir");
+                w.WriteNull("pathAlreadySet");
+            }
+            else
+            {
+                w.WriteString("skillDir", info.SkillDir);
+                w.WriteString("exeDir", info.ExeDir);
+                w.WriteBoolean("pathAlreadySet", info.PathAlreadySet);
+            }
+            w.WriteEndObject();
+            return jb.Complete();
+        }
+
+        private static string JsonDesktops(IReadOnlyList<DesktopInfo> items)
+        {
+            using var jb = new JsonBuffer();
+            var w = jb.Writer;
+            w.WriteStartObject();
+            w.WriteBoolean("success", true);
+            w.WriteNumber("count", items.Count);
+            w.WriteStartArray("desktops");
+            foreach (var d in items) WriteDesktop(w, d);
+            w.WriteEndArray();
+            w.WriteEndObject();
+            return jb.Complete();
+        }
+
+        private static void WriteDesktop(Utf8JsonWriter w, DesktopInfo d)
+        {
+            w.WriteStartObject();
+            w.WriteString("name", d.Name);
+            w.WriteString("path", d.Path);
+            w.WriteBoolean("enableWallpaper", d.EnableWallpaper);
+            w.WriteString("wallpaperPath", d.WallpaperPath);
+            w.WriteString("wallpaperStyle", d.WallpaperStyle);
+            w.WriteBoolean("encrypted", d.Encrypted);
+            w.WriteEndObject();
+        }
+
+        private static string JsonVersion()
+        {
+            using var jb = new JsonBuffer();
+            var w = jb.Writer;
+            w.WriteStartObject();
+            w.WriteBoolean("success", true);
+            w.WriteString("name", "MultiDesktop");
+            w.WriteString("version", Version);
+            w.WriteEndObject();
+            return jb.Complete();
+        }
+
+        private static string JsonSettings(bool changed, string colorName, int colorNum, string exitName, int exitNum)
+        {
+            using var jb = new JsonBuffer();
+            var w = jb.Writer;
+            w.WriteStartObject();
+            w.WriteBoolean("success", true);
+            w.WriteBoolean("changed", changed);
+            w.WriteString("color", colorName);
+            w.WriteNumber("colorValue", colorNum);
+            w.WriteString("exitMode", exitName);
+            w.WriteNumber("exitModeValue", exitNum);
+            w.WriteEndObject();
+            return jb.Complete();
+        }
+
+        private static string JsonHelp()
+        {
+            using var jb = new JsonBuffer();
+            var w = jb.Writer;
+            w.WriteStartObject();
+            w.WriteBoolean("success", true);
+            w.WriteString("name", "MultiDesktop");
+            w.WriteString("version", Version);
+            w.WriteString("usage", "MultiDesktop <命令> [--选项 值] [开关]");
+
+            w.WriteStartArray("globalOptions");
+            foreach (var o in GlobalOptionDocs)
+            {
+                w.WriteStartObject();
+                w.WriteString("option", o.Option);
+                w.WriteString("description", o.Description);
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
+
+            w.WriteStartArray("commands");
+            foreach (var c in CommandDocs)
+            {
+                w.WriteStartObject();
+                w.WriteString("name", c.Name);
+                w.WriteString("summary", c.Summary);
+                w.WriteString("usage", c.Usage);
+
+                w.WriteStartArray("options");
+                foreach (var o in c.Options)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("option", o.Option);
+                    w.WriteString("description", o.Description);
+                    w.WriteEndObject();
+                }
+                w.WriteEndArray();
+
+                w.WriteStartArray("examples");
+                foreach (var e in c.Examples) w.WriteStringValue(e);
+                w.WriteEndArray();
+
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
+
+            w.WriteEndObject();
+            return jb.Complete();
+        }
+
+        // ==================================================================
         //  命令实现
         // ==================================================================
 
         private static int CmdVersion(CliArgs a)
         {
             if (a.Has("--json"))
-                Console.Out.WriteLine(JsonSerializer.Serialize(
-                    new { success = true, name = "MultiDesktop", version = Version }, JsonOpts));
-            else
-                Console.Out.WriteLine($"MultiDesktop v{Version}");
+            {
+                Console.Out.WriteLine(JsonVersion());
+                return ExitCodes.Success;
+            }
+            Console.Out.WriteLine($"MultiDesktop v{Version}");
             return ExitCodes.Success;
         }
 
@@ -119,8 +302,7 @@ namespace MultiDesktop.Core
 
             if (a.Has("--json"))
             {
-                Console.Out.WriteLine(JsonSerializer.Serialize(
-                    new { success = true, count = items.Count, desktops = items }, JsonOpts));
+                Console.Out.WriteLine(JsonDesktops(items));
                 return ExitCodes.Success;
             }
 
@@ -161,24 +343,24 @@ namespace MultiDesktop.Core
             if (!add.Success) return Emit(a, add);
 
             if (!isEncrypt)
-                return Emit(a, OperationResult.Ok($"成功添加桌面: {name} -> {path}", new { name, path, encrypted = false }));
+                return Emit(a, OperationResult.Ok($"成功添加桌面: {name} -> {path}"),
+                    JsonAdd(true, $"成功添加桌面: {name} -> {path}", name!, path!, false));
 
             // 与 GUI 流程一致：先写配置（加密标记随行写入），再执行加密；
             // 加密失败时回滚配置行，避免留下“标记已加密但文件夹仍是明文”的脏配置
-            int id = EncryptionService.GetZipId(name);
+            int id = EncryptionService.GetZipId(name!);
             try
             {
                 EncryptionService.GetZipFile(path!, id, password!).GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
-                DesktopService.DeleteDesktop(name);
+                DesktopService.DeleteDesktop(name!);
                 return Emit(a, OperationResult.Fail($"添加失败: {ex.Message}"));
             }
 
-            return Emit(a, OperationResult.Ok(
-                $"成功添加桌面: {name} -> {path}\n已加密桌面: {name}（文件夹已加密，切换时需输入密码）",
-                new { name, path, encrypted = true }));
+            string msg = $"成功添加桌面: {name} -> {path}\n已加密桌面: {name}（文件夹已加密，切换时需输入密码）";
+            return Emit(a, OperationResult.Ok(msg), JsonAdd(true, msg, name!, path!, true));
         }
 
         private static int CmdRemove(CliArgs a)
@@ -241,8 +423,8 @@ namespace MultiDesktop.Core
             string message = outcome.Message;
             if (outcome.Warning != null) message += "\n" + outcome.Warning;
 
-            return Emit(a, OperationResult.Ok(message,
-                new { switched = target.Name, path = target.Path, warning = outcome.Warning }));
+            return Emit(a, OperationResult.Ok(message),
+                JsonSwitch(true, message, target.Name, target.Path, outcome.Warning));
         }
 
         private static int CmdWallpaper(CliArgs a)
@@ -302,7 +484,8 @@ namespace MultiDesktop.Core
                 }
 
                 DesktopService.SetEncryptedFlag(name, false);
-                return Emit(a, OperationResult.Ok($"已移除桌面 \"{name}\" 的加密", new { name, encrypted = false }));
+                string okMsg = $"已移除桌面 \"{name}\" 的加密";
+                return Emit(a, OperationResult.Ok(okMsg), JsonPassword(true, okMsg, name, false));
             }
 
             // ===== 设置 / 修改密码 =====
@@ -344,9 +527,10 @@ namespace MultiDesktop.Core
             DesktopService.SetEncryptedFlag(name, true);
             EncryptionService.SetSessionPassword(name, newPw!);
 
-            return Emit(a, hasOld
-                ? OperationResult.Ok($"已修改桌面 \"{name}\" 的加密密码", new { name, encrypted = true })
-                : OperationResult.Ok($"已加密桌面: {name}（文件夹已加密，切换时需输入密码）", new { name, encrypted = true }));
+            string pwMsg = hasOld
+                ? $"已修改桌面 \"{name}\" 的加密密码"
+                : $"已加密桌面: {name}（文件夹已加密，切换时需输入密码）";
+            return Emit(a, OperationResult.Ok(pwMsg), JsonPassword(true, pwMsg, name, true));
         }
 
         private static int CmdSettings(CliArgs a)
@@ -382,15 +566,7 @@ namespace MultiDesktop.Core
 
             if (a.Has("--json"))
             {
-                Console.Out.WriteLine(JsonSerializer.Serialize(new
-                {
-                    success = true,
-                    changed,
-                    color = colorName,
-                    colorValue = colorNum,
-                    exitMode = exitName,
-                    exitModeValue = exitNum,
-                }, JsonOpts));
+                Console.Out.WriteLine(JsonSettings(changed, colorName, colorNum, exitName, exitNum));
                 return ExitCodes.Success;
             }
 
@@ -403,28 +579,18 @@ namespace MultiDesktop.Core
             return ExitCodes.Success;
         }
 
-        private static int CmdInstallSkills(CliArgs a) => Emit(a, SkillInstaller.Install());
+        private static int CmdInstallSkills(CliArgs a)
+        {
+            var result = SkillInstaller.Install();
+            var info = result.Data as SkillInstallInfo;
+            return Emit(a, result, JsonSkills(result.Success, result.Message, info));
+        }
 
         private static int CmdHelp(CliArgs a)
         {
             if (a.Has("--json"))
             {
-                Console.Out.WriteLine(JsonSerializer.Serialize(new
-                {
-                    success = true,
-                    name = "MultiDesktop",
-                    version = Version,
-                    usage = "MultiDesktop <命令> [--选项 值] [开关]",
-                    globalOptions = new object[]
-                    {
-                        new { option = "--json", description = "以 JSON 输出结果（推荐给 AI / 脚本）" },
-                        new { option = "--quiet", description = "成功时不输出提示" },
-                        new { option = "--no-input", description = "禁止交互式输入，缺少密码时直接失败" },
-                        new { option = "--password-stdin", description = "从标准输入读取一个密码" },
-                        new { option = "--help, -h", description = "显示帮助" },
-                    },
-                    commands = CommandDocs,
-                }, JsonOpts));
+                Console.Out.WriteLine(JsonHelp());
                 return ExitCodes.Success;
             }
 
@@ -546,7 +712,17 @@ namespace MultiDesktop.Core
         // ==================================================================
 
         private sealed record OptionDoc(string Option, string Description);
+        private sealed record GlobalOptionDoc(string Option, string Description);
         private sealed record CommandDoc(string Name, string Summary, string Usage, OptionDoc[] Options, string[] Examples);
+
+        private static readonly GlobalOptionDoc[] GlobalOptionDocs =
+        {
+            new("--json", "以 JSON 输出结果（推荐给 AI / 脚本）"),
+            new("--quiet", "成功时不输出提示"),
+            new("--no-input", "禁止交互式输入，缺少密码时直接失败"),
+            new("--password-stdin", "从标准输入读取一个密码"),
+            new("--help, -h", "显示帮助"),
+        };
 
         private static readonly CommandDoc[] CommandDocs =
         {

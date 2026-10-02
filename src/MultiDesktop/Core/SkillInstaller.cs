@@ -1,5 +1,8 @@
 namespace MultiDesktop.Core
 {
+    /// <summary>安装结果的机器可读信息（供 CLI --json 输出）。</summary>
+    public sealed record SkillInstallInfo(string SkillDir, string ExeDir, bool PathAlreadySet);
+
     /// <summary>
     /// 安装 SKILL.md 到 WorkBuddy 技能目录，并把 exe 所在目录加入用户 PATH。
     /// 原先写在 frmSet 的按钮点击处理器里，现已独立为可复用模块。
@@ -41,7 +44,7 @@ namespace MultiDesktop.Core
                 var pathMsg = pathAlreadySet ? "PATH 已存在，无需重复添加" : "PATH 已添加";
                 return OperationResult.Ok(
                     $"Skills 安装成功！\n\nSkill 目录: {skillDir}\n{pathMsg}: {exeDir}",
-                    new { skillDir, exeDir, pathAlreadySet },
+                    new SkillInstallInfo(skillDir, exeDir, pathAlreadySet),
                     title: "安装成功");
             }
             catch (Exception ex)

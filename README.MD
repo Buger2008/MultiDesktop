@@ -311,7 +311,14 @@ dotnet publish src/MultiDesktop/MultiDesktop.csproj -c Release -r win-x64 --self
 
 常规 Release 输出目录为 `src/MultiDesktop/bin/Release/net10.0-windows/`。
 
-`MultiDesktop.AOT.csproj` 中启用了 `PublishAot=true`。这是一份 NativeAOT 构建配置，不代表所有架构与功能均已通过验证；发布前应检查本机工具链、WinForms 与依赖库的裁剪兼容性，并测试窗口、XML 配置和加解密功能。
+`MultiDesktop.AOT.csproj` 中启用了 `PublishAot=true`。实测（.NET 10 + MSVC 14.51 + Windows SDK 10.0.26100）发布成功，产出约 27 MB 的单文件原生 exe，CLI 的 XML 与 JSON 输出均正常。
+
+两点需要注意：
+
+- **CLI 的 JSON 输出刻意不使用反射式序列化**（改用 `Utf8JsonWriter` 手工写入）。`JsonSerializer.Serialize` 的反射式路径在 NativeAOT 下会抛 `InvalidOperationException: Reflection-based serialization has been disabled`；更麻烦的是该异常若冒泡到 GUI 的顶层兜底逻辑会被吞掉，表现为**退出码 0 但输出为空**，脚本会误判为成功。
+- 构建期仍会报告 `System.Data.DataTable.ReadXml` / `WriteXml` 的 `IL3050` 警告。实测该路径在 AOT 下工作正常（配置文件读写无异常），属保守误报；其余 `IL3053` 警告来自 WinForms / AntdUI 等依赖库。
+
+发布前仍应在本机验证窗口、XML 配置与加解密功能。
 
 ### 源码导航
 

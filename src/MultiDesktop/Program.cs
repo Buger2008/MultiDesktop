@@ -46,7 +46,19 @@ namespace MultiDesktop
             if (args.Length > 0)
             {
                 AttachConsole(-1);
-                Environment.ExitCode = CliRunner.Run(args);
+                int code;
+                try
+                {
+                    code = CliRunner.Run(args);
+                }
+                catch (Exception ex)
+                {
+                    // CLI 必须自己兜底：若让异常冒泡到 Main 的 GUI 兜底逻辑，
+                    // 会弹窗且进程仍以 0 退出，脚本会误判为成功（而 stdout 空无一物）。
+                    Console.Error.WriteLine($"错误: {ex.Message}");
+                    code = ExitCodes.Failure;
+                }
+                Environment.ExitCode = code;
                 return;
             }
 

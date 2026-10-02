@@ -134,17 +134,37 @@ MultiDesktop settings --color 深色 --exit-mode 询问
 
 ### JSON 输出格式
 
-成功与失败统一为：
+所有命令都包含 `success` 与 `message`；各命令再附加自己的字段（**平铺在顶层，没有 `data` 嵌套**）。
 
 ```json
-{
-  "success": true,
-  "message": "已切换到桌面: 工作 -> D:\\WorkDesktop",
-  "data": { "switched": "工作", "path": "D:\\WorkDesktop", "warning": null }
-}
+// switch
+{ "success": true, "message": "已切换到桌面: 工作 -> D:\\WorkDesktop",
+  "switched": "工作", "path": "D:\\WorkDesktop", "warning": null }
+
+// add
+{ "success": true, "message": "成功添加桌面: 工作 -> D:\\WorkDesktop",
+  "name": "工作", "path": "D:\\WorkDesktop", "encrypted": false }
+
+// password
+{ "success": true, "message": "已修改桌面 \"私密\" 的加密密码",
+  "name": "私密", "encrypted": true }
+
+// install-skills
+{ "success": true, "message": "Skills 安装成功！...",
+  "skillDir": "...", "exeDir": "...", "pathAlreadySet": false }
 ```
 
-`list --json` 的结构：
+其余命令的附加字段：
+
+| 命令 | 附加字段 |
+|---|---|
+| `list` | `count`、`desktops[]`（每项含 `name` / `path` / `enableWallpaper` / `wallpaperPath` / `wallpaperStyle` / `encrypted`） |
+| `version` | `name`、`version` |
+| `settings` | `changed`、`color`、`colorValue`、`exitMode`、`exitModeValue` |
+| `help` | `usage`、`globalOptions[]`、`commands[]` |
+| `remove` / `wallpaper` | 仅 `success`、`message` |
+
+`list --json` 示例：
 
 ```json
 {
@@ -162,6 +182,9 @@ MultiDesktop settings --color 深色 --exit-mode 询问
   ]
 }
 ```
+
+> JSON 由 `Utf8JsonWriter` 手工写入，**不使用反射式序列化** —— 后者在 NativeAOT 下会抛
+> `Reflection-based serialization has been disabled`。已实测 AOT 发布版的 JSON 输出正常。
 
 ---
 
@@ -297,7 +320,12 @@ Core/CliArgs.cs / CliRunner.cs 命令行解析与调度
 ### 构建与发布
 
 - 目标框架：`net10.0-windows`
-- 支持 AOT 发布 (`PublishAot=true`)，但未验证全部架构与功能
+- 支持 AOT 发布 (`PublishAot=true`)。实测（.NET 10 + MSVC 14.51 + Windows SDK 10.0.26100）：发布成功，
+  产出约 27 MB 单文件原生 exe，CLI 的 XML 与 JSON 输出均正常。构建期仍会报告
+  `System.Data.DataTable.ReadXml/WriteXml` 的 `IL3050` 警告，但实测该路径在 AOT 下工作正常（属保守误报）；
+  其余 `IL3053` 来自 WinForms / AntdUI 等依赖库
+- **不要用反射式 JSON 序列化**：`JsonSerializer.Serialize` 在 AOT 下抛
+  `Reflection-based serialization has been disabled`，JSON 输出一律用 `Utf8JsonWriter` 手工写入
 - 支持 MSIX 打包（包名：`Buger2008.MultiDesktop`，版本 `1.3.6.0`）
 - 目标平台：x86 / x64 / ARM / ARM64
 - 默认语言：zh-CN
