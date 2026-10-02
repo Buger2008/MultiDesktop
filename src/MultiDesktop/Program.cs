@@ -72,54 +72,21 @@ namespace MultiDesktop
     }
 
     /// <summary>
-    /// 窗体间传值用的 static 中介（沿用原方案，不使用委托）。
-    /// 桌面数据与全部业务操作已委托给 Core，本类只保留 GUI 侧的状态中转。
+    /// 桌面编辑窗体的 static 中介传值（沿用原方案，不使用委托）。
+    /// 数据访问与业务操作已全部迁至 Core，本类只承载窗体间的编辑状态。
     /// </summary>
-    public static class DesktopManager
+    public static class DesktopEditState
     {
-        /// <summary>桌面配置表（唯一来源为 Core 的 DesktopRepository）。</summary>
-        public static DataTable DesktopList => DesktopRepository.Table;
-
-        // ===== 窗体间传值 =====
         public static string? t_DesktopName = "";
         public static string? t_DesktopPath = "";
         public static bool IsEdit = false;
         public static int IndexToChange;
 
-        /// <summary>记录当前激活桌面，供 Core 判断是否需要重新加密离开的加密桌面。</summary>
-        public static void SetCurrentDesktop(string? name, string? path, bool encrypted)
-            => DesktopSwitchService.SetCurrentDesktop(name, path, encrypted);
-
-        /// <summary>安全读取行中的布尔值（兼容旧版 XML 缺少列/值为空的情况）。</summary>
-        public static bool GetBool(DataRow row, int index) => DesktopRepository.GetBool(row, index);
-
-        /// <summary>安全读取行中的字符串值。</summary>
-        public static string? GetString(DataRow row, int index) => DesktopRepository.GetString(row, index);
-
-        public static void ReSetDesktopManager()
+        public static void Reset()
         {
             t_DesktopName = "";
             t_DesktopPath = "";
             IsEdit = false;
-        }
-
-        /// <summary>
-        /// 添加 / 编辑桌面配置。失败时保持原有的无标题 MessageBox 提示与返回值语义。
-        /// </summary>
-        public static bool AddDesktop(string DesktopName, string DesktopPath, bool enableWallpaper, string wallpaperPath, string wallpaperStyle, bool IsEncrypt)
-        {
-            var result = DesktopService.AddDesktop(
-                DesktopName, DesktopPath, enableWallpaper, wallpaperPath, wallpaperStyle,
-                IsEncrypt, IsEdit, IndexToChange,
-                // 编辑一个已加密的桌面时，其明文文件夹已被加密删除，路径不存在属正常
-                allowMissingPath: EncryptManager.IsEncrypted);
-
-            if (!result.Success)
-            {
-                MessageBox.Show(result.Message);
-                return false;
-            }
-            return true;
         }
     }
 

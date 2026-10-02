@@ -21,7 +21,7 @@ namespace MultiDesktop
             frmAddDesktop frmAddDesktop = new();
             frmAddDesktop.ShowDialog();
             tblDesktopList.Refresh();
-            DesktopManager.IndexToChange = DesktopManager.DesktopList.Rows.Count;
+            DesktopEditState.IndexToChange = DesktopRepository.Table.Rows.Count;
         }
 
         private void frmMain_Load(object sender, EventArgs e)
@@ -41,17 +41,17 @@ namespace MultiDesktop
             itmAboutMenu.Text = GlobalLocalizer.Localize(itmAboutMenu.Text);
             itmExit.Text = GlobalLocalizer.Localize(itmExit.Text);
 
-            tblDesktopList.DataSource = DesktopManager.DesktopList;
+            tblDesktopList.DataSource = DesktopRepository.Table;
             tblDesktopList.Refresh();
             notifyIcon1.Visible = true;
 
             // 记录当前正在使用的桌面（用于离开加密桌面时自动重新加密）
             var current = DesktopService.DetectCurrentDesktop();
             if (current != null)
-                DesktopManager.SetCurrentDesktop(current.Name, current.Path, current.Encrypted);
+                DesktopSwitchService.SetCurrentDesktop(current.Name, current.Path, current.Encrypted);
 
             int DesktopIndex = 0;
-            foreach (DataRow desktopnames in DesktopManager.DesktopList.Rows)
+            foreach (DataRow desktopnames in DesktopRepository.Table.Rows)
             {
                 string? desktopname = desktopnames[0].ToString();
                 ToolStripMenuItem menuItem = new ToolStripMenuItem(desktopname);
@@ -78,13 +78,13 @@ namespace MultiDesktop
         private void btnEditDesktop_Click(object sender, EventArgs e)
         {
             int idx = tblDesktopList.SelectedIndex - 1;
-            if (idx < 0 || idx >= DesktopManager.DesktopList.Rows.Count) return;
-            var row = DesktopManager.DesktopList.Rows[idx];
-            DesktopManager.t_DesktopName = DesktopManager.GetString(row, 0);
-            DesktopManager.t_DesktopPath = DesktopManager.GetString(row, 1);
-            DesktopManager.IsEdit = true;
-            DesktopManager.IndexToChange = idx;
-            EncryptManager.IsEncrypted = DesktopManager.GetBool(row, 5);
+            if (idx < 0 || idx >= DesktopRepository.Table.Rows.Count) return;
+            var row = DesktopRepository.Table.Rows[idx];
+            DesktopEditState.t_DesktopName = DesktopRepository.GetString(row, DesktopRepository.IdxName);
+            DesktopEditState.t_DesktopPath = DesktopRepository.GetString(row, DesktopRepository.IdxPath);
+            DesktopEditState.IsEdit = true;
+            DesktopEditState.IndexToChange = idx;
+            EncryptManager.IsEncrypted = DesktopRepository.GetBool(row, DesktopRepository.IdxEncrypted);
             frmAddDesktop frmAddDesktop = new();
             frmAddDesktop.ShowDialog();
             tblDesktopList.Refresh();
@@ -116,8 +116,8 @@ namespace MultiDesktop
         private async void btnChangeDesktop_Click(object sender, EventArgs e)
         {
             int idx = tblDesktopList.SelectedIndex - 1;
-            if (idx < 0 || idx >= DesktopManager.DesktopList.Rows.Count) return;
-            await SwitchToDesktopAsync(DesktopManager.DesktopList.Rows[idx]);
+            if (idx < 0 || idx >= DesktopRepository.Table.Rows.Count) return;
+            await SwitchToDesktopAsync(DesktopRepository.Table.Rows[idx]);
         }
 
         /// <summary>
@@ -234,8 +234,8 @@ namespace MultiDesktop
 
             if (clickedItem is not null && clickedItem.Tag is int index)
             {
-                if (index < 0 || index >= DesktopManager.DesktopList.Rows.Count) return;
-                await SwitchToDesktopAsync(DesktopManager.DesktopList.Rows[index]);
+                if (index < 0 || index >= DesktopRepository.Table.Rows.Count) return;
+                await SwitchToDesktopAsync(DesktopRepository.Table.Rows[index]);
             }
         }
 
@@ -251,7 +251,7 @@ namespace MultiDesktop
             else { itmDesktopList.Enabled = true;}
             itmDesktopList.DropDownItems.Clear();
             int DesktopIndex = 0;
-            foreach (DataRow desktopnames in DesktopManager.DesktopList.Rows)
+            foreach (DataRow desktopnames in DesktopRepository.Table.Rows)
             {
                 string? desktopname = desktopnames[0].ToString();
                 ToolStripMenuItem menuItem = new ToolStripMenuItem(desktopname);
