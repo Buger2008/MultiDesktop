@@ -1,8 +1,16 @@
-# MultiDesktop — Windows 多桌面切换管理
+# MultiDesktop
+
+**为工作、学习和生活，切换不同的 Windows 桌面文件夹。**
+
+[快速开始](#快速开始) · [命令行使用](#命令行使用) · [加密安全说明](#加密安全说明) · [源码构建](#源码构建) · [发行页面](https://github.com/Qibowen2008/MultiDesktop/releases)
+
+> **项目定位：** MultiDesktop 切换的是当前用户的 Windows 桌面目录及可选壁纸，不是 `Win + Tab` 中的应用窗口工作区，也不是虚拟机或隔离沙箱。运行中的应用不会被隔离。
 
 ![多桌面切换主界面](https://raw.githubusercontent.com/Buger2008/MultiDesktop/net10rebuild/pics/1.png)
 
-一款基于 .NET 10 的 Windows 多桌面管理工具。通过 Win32 Shell API 修改桌面文件夹路径，实现多个虚拟桌面之间的一键切换——每个"桌面"拥有独立的文件夹，互不干扰，切换无需重启资源管理器。
+一款基于 **C# / .NET 10 / Windows Forms** 的本地桌面管理工具。将工作文件、学习资料和娱乐快捷方式分别保存在不同文件夹，通过主窗口或系统托盘切换桌面内容，并为不同桌面配置独立壁纸。
+
+切换优先使用 Win32 Shell API；失败时回退到修改注册表并重启资源管理器。添加配置不会自动迁移原桌面文件，公共桌面中的快捷方式仍可能显示。
 
 > 支持 **桌面加密**：可以为任意桌面设置密码，切换时需输入密码解锁，离开时自动重新加密，保护你的私密文件。
 
@@ -19,18 +27,23 @@
 
 ---
 
-## 🚀 快速开始
+## 快速开始
 
 ### 运行环境
 
-- Windows 10 (build 14393) 及以上
-- .NET 10 运行时（或直接使用免安装发布版）
+- Windows 系统；项目目标框架为 `net10.0-windows`，不支持直接在 Linux 或 macOS 上运行。
+- 依赖框架的发行版本需要 **.NET 10 Desktop Runtime**，从源码构建需要 **.NET 10 SDK**。
+- 自包含或 NativeAOT 发行包的运行要求、支持架构和最低系统版本，以具体发行说明和测试结果为准。
 
 ### 安装
 
-1. 从 [Releases](https://github.com/Qibowen2008/MultiDesktop/releases) 下载最新版本（支持 x86 / x64 / ARM / ARM64，可打包 MSIX）
-2. 解压后运行 `MultiDesktop.exe`
-3. 首次运行会自动创建配置文件
+1. 从 [Releases](https://github.com/Qibowen2008/MultiDesktop/releases) 选择适合系统的发行包，按包内说明运行 `MultiDesktop.exe`。
+2. 备份重要文件并记录原桌面目录。建议先创建一个非重要的测试文件夹体验功能。
+3. 点击 **添加桌面**，填写唯一名称并选择已有文件夹，可选配置壁纸。
+4. 保存后选中桌面，点击 **切换到选中桌面**，或从系统托盘菜单切换。
+5. 将原桌面目录也保存为配置，方便切回。退出程序不会自动恢复原桌面。
+
+首次使用时会按需创建配置。普通桌面切换后，原文件仍在原目录；删除桌面配置不等于删除文件，也不等于解除加密。
 
 ### 从源码构建
 
@@ -71,7 +84,21 @@ dotnet build src/MultiDesktop/MultiDesktop.csproj -c Release
 
 1. 设置密码时，桌面文件夹先被压缩为 zip，再用 **后量子密码学文件加密**（`PostQuantum.FileEncryption`）加密为 `Zips\<id>.zip.encrypted`，然后删除原明文文件夹
 2. 加密包 id 由桌面名称经 FNV-1a 哈希生成，删除或重排桌面不会导致 id 错位
-3. **密码不会存储在任何位置**，校验密码的唯一方式是实际解密——忘记密码将无法恢复文件，请务必妥善保管
+3. 密码不写入桌面配置，但已验证的密码会缓存在本次会话的内存中，以便重新加密。正常密码校验通过实际解密完成，项目没有密码找回机制。
+
+### 加密安全说明
+
+> **加密会实际删除原明文文件夹，不只是锁定界面。请先备份，再用非重要数据测试。**
+
+- **退出不等于锁定：** 当前退出逻辑不会自动重新加密正在使用的桌面。应先切换到普通桌面，确认重新加密成功后再退出。
+- **解锁时文件为明文：** 有权限的其他进程仍可读取文件，不提供应用隔离。
+- **重新加密可能失败：** 文件占用、权限不足或空间不足等异常可能让文件保持明文，应认真检查提示。
+- **临时明文会落盘：** 压缩、解密与密码验证过程中会产生明文 ZIP 或临时解压目录，正常清理不等于安全擦除。
+- **加密包不是版本备份：** 重新加密会替换旧包，应保留独立备份，不应宣称异常情况下绝不丢失数据。
+- **谨慎改名：** 加密包 ID 依赖桌面名称。建议先移除加密，再修改名称，最后重新设置密码。
+- **优先使用 GUI 输入密码：** 命令行密码可能出现在终端历史、脚本和进程参数中。
+
+引用加密库不代表整个应用已通过安全审计。
 
 ### 加密流程（GUI）
 
@@ -84,15 +111,28 @@ dotnet build src/MultiDesktop/MultiDesktop.csproj -c Release
 ### 加密流程（CLI）
 
 ```bash
-# 添加桌面并直接加密
-MultiDesktop --AddDesktop "私密" "D:\PrivateDesktop" --SetPassword 123456
+# 参数语法示意；请优先在图形界面设置密码
+MultiDesktop --AddDesktop <名称> <已有文件夹路径> --SetPassword <密码>
 ```
 
 ---
 
 ## 💻 CLI 命令行
 
-不提供任何参数时默认启动 GUI 模式。
+### 命令行使用
+
+不提供任何参数时默认启动 GUI 模式。在 PowerShell 的程序目录下运行时，使用 `.\MultiDesktop.exe`。
+
+```powershell
+.\MultiDesktop.exe --help
+.\MultiDesktop.exe --version
+.\MultiDesktop.exe --AddDesktop "工作" "D:\WorkDesktop"
+.\MultiDesktop.exe --ListDesktop
+```
+
+目标文件夹需事先存在。`--ListDesktop` 当前输出 XML 配置内容，而不是格式化表格。`--SetBack`、`--SetStyle`、`--SetPassword` 是 `--AddDesktop` 的附加参数，应放在名称和路径后面，不是独立编辑命令。建议每次调用执行一项操作。
+
+**当前没有独立的 CLI 桌面切换命令，切换请使用主窗口或托盘菜单。**
 
 | 参数 | 说明 | 示例 |
 |---|---|---|
@@ -145,10 +185,56 @@ MultiDesktop --AddDesktop "私密" "D:\PrivateDesktop" --SetPassword 123456
 
 ### 构建与发布
 
-- 目标框架：`net10.0-windows`，UI 基于 AntdUI v2.4.2
-- 支持 NativeAOT 发布（`PublishAot=true`）
-- 支持 MSIX 打包（包名 `Buger2008.MultiDesktop`）
-- 目标平台：x86 / x64 / ARM / ARM64，默认语言 zh-CN
+### 源码构建
+
+当前项目配置：
+
+| 组件 | 版本 / 用途 |
+| --- | --- |
+| C# / .NET | `net10.0-windows` |
+| Windows Forms | 窗口与事件处理 |
+| AntdUI | `2.4.4`，界面控件 |
+| I18N.DotNet | `1.3.1`，国际化相关支持 |
+| PostQuantum.FileEncryption | `1.6.0`，文件加解密 |
+| 程序集版本 | `1.3.6.0` |
+
+在 Windows 上安装 .NET 10 SDK，在仓库根目录执行：
+
+```powershell
+# 构建，默认自动还原依赖
+ dotnet build src/MultiDesktop/MultiDesktop.csproj -c Release
+
+# 启动 GUI；实际操作会修改桌面设置
+ dotnet run --project src/MultiDesktop/MultiDesktop.csproj
+
+# Windows x64 自包含发布示例
+ dotnet publish src/MultiDesktop/MultiDesktop.csproj -c Release -r win-x64 --self-contained true -o publish/local-win-x64
+```
+
+常规 Release 输出目录为 `src/MultiDesktop/bin/Release/net10.0-windows/`。
+
+`MultiDesktop.AOT.csproj` 中启用了 `PublishAot=true`。这是一份 NativeAOT 构建配置，不代表所有架构与功能均已通过验证；发布前应检查本机工具链、WinForms 与依赖库的裁剪兼容性，并测试窗口、XML 配置和加解密功能。
+
+### 源码导航
+
+| 文件（相对 `src/MultiDesktop/`） | 主要职责 |
+| --- | --- |
+| `Program.cs` | 启动、CLI、配置路径、桌面和壁纸切换、加解密 |
+| `frmMain.cs` | 桌面列表、切换工作流与托盘交互 |
+| `frmAddDesktop.cs` | 添加和编辑桌面 |
+| `frmPassword.cs` | 设置、修改和移除密码 |
+| `frmInputPassword.cs` | 解锁密码输入 |
+| `frmSet.cs` / `frmClose.cs` | 设置与关闭行为 |
+| `frmAbout.cs` | 关于窗口 |
+| `*.Designer.cs` | 对应窗体布局 |
+
+`Program.cs` 中的核心类包括 `AppPaths`、`DesktopManager`、`AppSettingsManager` 和 `EncryptManager`。
+
+### 迁移与问题反馈
+
+迁移时应同时保留 `DesktopList.xml`、`AppSettings.xml`、配置目录下的 `Zips/`，以及配置目录之外的桌面文件夹。仅复制 EXE 不会迁移数据，绝对路径也可能需要重新配置。
+
+启动顶层异常时，程序会尝试在配置目录写入 `error.log`。欢迎通过 [Issues](https://github.com/Qibowen2008/MultiDesktop/issues) 提交系统版本、程序版本、复现步骤和脱敏后的错误信息。不要上传密码、私密文件或未经检查的配置与加密包。
 
 ---
 

@@ -13,6 +13,10 @@
 ; ============================================================
 
 Unicode true
+; 高 DPI 支持：per-monitor v2 + 系统级双声明（NSIS 官方推荐写法），
+; 高分屏文字锐利、对话框随 DPI 缩放；Win10 1703+ 用 PMv2，旧系统回退 System
+ManifestDPIAware true
+ManifestDPIAwareness "PerMonitorV2,System"
 
 ; ---------------- 常量 ----------------
 !ifndef APP_NAME
