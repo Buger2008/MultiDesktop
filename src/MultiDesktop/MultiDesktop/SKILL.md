@@ -11,7 +11,7 @@ metadata:
   version: "1.3.6.0"
   repository: https://github.com/Qibowen2008/MultiDesktop
   platform: net10.0-windows
-  ui-framework: AntdUI v2.4.2
+  ui-framework: AntdUI v2.4.4
   tags:
     - windows
     - desktop
