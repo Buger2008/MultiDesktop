@@ -26,6 +26,7 @@ publish/**/BundleArtifacts/
 *.userosscache
 *.sln.docstates
 *.userprefs
+src/.nuget/
 
 ## Build artifacts
 *.exe
@@ -50,6 +51,7 @@ txt_log*.txt
 
 ## Local tooling workspace
 .freebuff/
+.workbuddy-ai/
 
 ## OS files
 Thumbs.db
