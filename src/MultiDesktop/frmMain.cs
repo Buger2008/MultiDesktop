@@ -1,4 +1,5 @@
 using I18N.DotNet;
+using MultiDesktop.Core;
 using System.Data;
 using PostQuantum.FileEncryption;
 using static I18N.DotNet.Localizer;
@@ -10,22 +11,9 @@ namespace MultiDesktop
         public frmMain()
         {
             InitializeComponent();
-            if (File.Exists(AppPaths.DesktopList))
-            {
-                DesktopManager.DesktopList.ReadXml(AppPaths.DesktopList);
-                DesktopManager.EnsureDesktopListColumns(DesktopManager.DesktopList);
-            }
-            else
-            {
-                DesktopManager.DesktopList.TableName = ("DesktopList");
-                DesktopManager.DesktopList.Columns.Add("桌面名称", typeof(string));
-                DesktopManager.DesktopList.Columns.Add("桌面路径", typeof(string));
-                DesktopManager.DesktopList.Columns.Add("是否开启自定义壁纸", typeof(bool));
-                DesktopManager.DesktopList.Columns.Add("自定义壁纸地址", typeof(string));
-                DesktopManager.DesktopList.Columns.Add("壁纸显示方式", typeof(string));
-                DesktopManager.DesktopList.Columns.Add("是否加密", typeof(bool));
-            }
-            tblDesktopList.DataSource = DesktopManager.DesktopList;
+            // 桌面配置的加载（含旧版 XML 列补全与主键建立）统一由 Core 的 DesktopRepository 负责，
+            // 不再在窗体里重复建表/建列
+            tblDesktopList.DataSource = DesktopRepository.Table;
         }
 
         private void btnAddDesktop_Click(object sender, EventArgs e)
@@ -58,17 +46,9 @@ namespace MultiDesktop
             notifyIcon1.Visible = true;
 
             // 记录当前正在使用的桌面（用于离开加密桌面时自动重新加密）
-            string currentDesktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-            foreach (DataRow r in DesktopManager.DesktopList.Rows)
-            {
-                string? p = DesktopManager.GetString(r, 1);
-                if (!string.IsNullOrEmpty(p) &&
-                    string.Equals(Path.GetFullPath(p).TrimEnd('\\'), Path.GetFullPath(currentDesktop).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
-                {
-                    DesktopManager.SetCurrentDesktop(DesktopManager.GetString(r, 0), p, DesktopManager.GetBool(r, 5));
-                    break;
-                }
-            }
+            var current = DesktopService.DetectCurrentDesktop();
+            if (current != null)
+                DesktopManager.SetCurrentDesktop(current.Name, current.Path, current.Encrypted);
 
             int DesktopIndex = 0;
             foreach (DataRow desktopnames in DesktopManager.DesktopList.Rows)
@@ -83,18 +63,16 @@ namespace MultiDesktop
 
         private void btnDeleteDesktop_Click(object sender, EventArgs e)
         {
-            if (tblDesktopList.SelectedIndexs.Length != 0)
-            {
-                foreach (int i in tblDesktopList.SelectedIndexs.OrderByDescending(x => x))
-                {
-                    DesktopManager.DesktopList.Rows[i - 1].Delete();
-                }
-                DesktopManager.DesktopList.AcceptChanges();
-                tblDesktopList.Refresh();
-                DesktopManager.DesktopList.WriteXml(AppPaths.DesktopList, XmlWriteMode.WriteSchema);
-            }
+            if (tblDesktopList.SelectedIndexs.Length == 0) return;
 
+            // 选中索引含表头偏移（从 1 开始），换算为 DataTable 行索引后交给 Core 删除
+            var result = DesktopService.DeleteByRowIndexes(
+                tblDesktopList.SelectedIndexs.Select(i => i - 1));
 
+            if (!result.Success)
+                MessageBox.Show(result.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+            tblDesktopList.Refresh();
         }
 
         private void btnEditDesktop_Click(object sender, EventArgs e)
@@ -143,45 +121,35 @@ namespace MultiDesktop
         }
 
         /// <summary>
-        /// 切换桌面：目标为加密桌面时先弹窗校验密码并解锁；
-        /// 正在离开的加密桌面（已解密）在切换完成后自动重新加密。
+        /// 切换桌面。窗体只负责弹窗收集密码，
+        /// 解锁、切换目录与壁纸、离开加密桌面的重新加密等业务步骤全部由
+        /// Core 的 DesktopSwitchService 完成（与 CLI 的 switch 命令共用同一实现）。
         /// </summary>
         private async Task SwitchToDesktopAsync(DataRow row)
         {
-            string name = DesktopManager.GetString(row, 0) ?? "";
-            string path = DesktopManager.GetString(row, 1) ?? "";
-            if (string.IsNullOrEmpty(path)) return;
-            bool targetEncrypted = DesktopManager.GetBool(row, 5);
-            bool enableWallpaper = DesktopManager.GetBool(row, 2);
-            string? wallpaperPath = DesktopManager.GetString(row, 3);
-            string? wallpaperStyle = DesktopManager.GetString(row, 4);
-            string? wallpaper = enableWallpaper && !string.IsNullOrEmpty(wallpaperPath) ? wallpaperPath : null;
+            var target = DesktopService.FromRow(row);
+            if (target == null || string.IsNullOrEmpty(target.Path)) return;
 
-            // 1. 正在离开的加密桌面若已解密（存在明文文件夹），先取得其密码（切换前询问，避免切换后困惑）
+            var req = DesktopSwitchService.GetSwitchRequirements(target);
+
+            // 1. 离开的加密桌面若已解密（存在明文文件夹），先取得其密码（切换前询问，避免切换后困惑）
             string? leavingPw = null;
-            bool leavingNeedsReEncrypt = DesktopManager.CurrentDesktopEncrypted
-                && !string.IsNullOrEmpty(DesktopManager.CurrentDesktopName)
-                && !string.IsNullOrEmpty(DesktopManager.CurrentDesktopPath)
-                && Directory.Exists(DesktopManager.CurrentDesktopPath);
-            if (leavingNeedsReEncrypt)
+            if (req.LeavingNeedsPassword)
             {
-                leavingPw = EncryptManager.GetSessionPassword(DesktopManager.CurrentDesktopName);
+                leavingPw = EncryptManager.GetSessionPassword(req.LeavingName);
                 if (leavingPw == null)
                 {
                     // 会话内无缓存密码：弹窗输入，并通过实际解密验证（密码错误会重新弹窗）
-                    EncryptManager.DesktopName = DesktopManager.CurrentDesktopName;
-                    EncryptManager.DesktopFolder = DesktopManager.CurrentDesktopPath;
-                    EncryptManager.DesktopID = EncryptManager.GetZipId(DesktopManager.CurrentDesktopName!);
                     while (true)
                     {
-                        using var frm = new frmInputPassword { PromptText = $"请输入桌面“{DesktopManager.CurrentDesktopName}”的密码以重新加密" };
+                        using var frm = new frmInputPassword { PromptText = $"请输入桌面“{req.LeavingName}”的密码以重新加密" };
                         if (frm.ShowDialog() != DialogResult.OK)
                             return; // 用户取消，不切换
                         leavingPw = EncryptManager.Password;
                         try
                         {
-                            await EncryptManager.VerifyPasswordByDecryptAsync(EncryptManager.DesktopID, leavingPw!);
-                            EncryptManager.SetSessionPassword(DesktopManager.CurrentDesktopName, leavingPw!);
+                            await EncryptionService.VerifyPasswordByDecryptAsync(req.LeavingId, leavingPw!);
+                            EncryptionService.SetSessionPassword(req.LeavingName, leavingPw!);
                             break;
                         }
                         catch (PqDecryptionException)
@@ -192,75 +160,36 @@ namespace MultiDesktop
                 }
             }
 
-            // 2. 执行切换：目标加密时弹窗输入密码，并通过实际解密来校验（密码错误会重新弹窗）
-            try
+            // 2. 执行切换：目标加密时弹窗输入密码；密码错误由 Core 以 BadPassword 回报后重新弹窗
+            while (true)
             {
-                if (targetEncrypted)
+                string? targetPw = null;
+                if (req.TargetNeedsPassword)
                 {
-                    EncryptManager.DesktopName = name;
-                    EncryptManager.DesktopFolder = path;
-                    EncryptManager.DesktopID = EncryptManager.GetZipId(name);
-                    while (true)
-                    {
-                        using var frm = new frmInputPassword { PromptText = $"请输入桌面“{name}”的密码" };
-                        if (frm.ShowDialog() != DialogResult.OK)
-                            return; // 用户取消
-                        string pw = EncryptManager.Password!;
-                        try
-                        {
-                            if (Directory.Exists(path))
-                            {
-                                // 文件夹已存在（此前已解锁为明文）：先验证密码，再直接切换，
-                                // 避免用可能过期的压缩包覆盖桌面上的新文件
-                                await EncryptManager.VerifyPasswordByDecryptAsync(EncryptManager.DesktopID, pw);
-                                DesktopManager.ChangeDesktopPath(path, wallpaper, wallpaperStyle);
-                            }
-                            else
-                            {
-                                // 文件夹不存在：真实解密还原后切换（密码错误会在这里抛 PqDecryptionException）
-                                await DesktopManager.ChangeDesktopPathWithPassword(path, wallpaper, wallpaperStyle, EncryptManager.DesktopID, pw);
-                            }
-                            EncryptManager.SetSessionPassword(name, pw);
-                            break;
-                        }
-                        catch (PqDecryptionException)
-                        {
-                            MessageBox.Show("密码错误，请重试", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        }
-                    }
+                    using var frm = new frmInputPassword { PromptText = $"请输入桌面“{target.Name}”的密码" };
+                    if (frm.ShowDialog() != DialogResult.OK)
+                        return; // 用户取消
+                    targetPw = EncryptManager.Password;
                 }
-                else
+
+                var outcome = await DesktopSwitchService.SwitchToAsync(target, req, targetPw, leavingPw);
+
+                if (outcome.BadPassword)
                 {
-                    DesktopManager.ChangeDesktopPath(path, wallpaper, wallpaperStyle);
+                    MessageBox.Show("密码错误，请重试", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    continue;
                 }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"切换失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (!outcome.Success)
+                {
+                    MessageBox.Show(outcome.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                if (outcome.Warning != null)
+                {
+                    MessageBox.Show(outcome.Warning, "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
                 return;
             }
-
-            // 3. 切换完成后，重新加密离开的桌面（此时 explorer 已释放旧桌面文件夹）
-            if (leavingNeedsReEncrypt
-                && !string.IsNullOrEmpty(DesktopManager.CurrentDesktopPath)
-                && Directory.Exists(DesktopManager.CurrentDesktopPath))
-            {
-                string oldName = DesktopManager.CurrentDesktopName!;
-                string oldPath = DesktopManager.CurrentDesktopPath;
-                await Task.Delay(800); // 等待 explorer 释放旧桌面文件夹
-                try
-                {
-                    await EncryptManager.GetZipFile(oldPath, EncryptManager.GetZipId(oldName), leavingPw!);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"警告：桌面“{oldName}”重新加密失败（文件暂为明文）：{ex.Message}",
-                        "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            }
-
-            // 4. 记录当前桌面
-            DesktopManager.SetCurrentDesktop(name, path, targetEncrypted);
         }
 
         private void btnSet_Click(object sender, EventArgs e)
@@ -272,12 +201,13 @@ namespace MultiDesktop
         private void frmMain_FormClosing(object sender, FormClosingEventArgs e)
         {
             e.Cancel = true;
-            if (Convert.ToInt16(AppSettingsManager.AppSettings.Rows.Find("ExitMode")?["Value"]) == 0)
+            if (SettingsService.GetNum(SettingsService.KeyExitMode) == 0)
             {
                 frmClose close = new frmClose();
                 close.ShowDialog();
             }
-            if (Program.IsMinWindow || Convert.ToInt16(AppSettingsManager.AppSettings.Rows.Find("ExitMode")?["Value"]) == 1)
+            // 关闭确认窗口可能刚刚改写了 ExitMode，这里重新读取
+            if (Program.IsMinWindow || SettingsService.GetNum(SettingsService.KeyExitMode) == 1)
             {
                 Hide();
             }

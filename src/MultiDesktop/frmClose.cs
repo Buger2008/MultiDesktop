@@ -1,4 +1,5 @@
-﻿using I18N.DotNet;
+using I18N.DotNet;
+using MultiDesktop.Core;
 using static I18N.DotNet.Localizer;
 
 namespace MultiDesktop
@@ -14,8 +15,8 @@ namespace MultiDesktop
         {
             if (checkbox1.Checked)
             {
-                AppSettingsManager.AppSettings.Rows.Find("ExitMode")?["Value"] = 2;
-                AppSettingsManager.AppSettings.WriteXml(AppPaths.AppSettings, System.Data.XmlWriteMode.WriteSchema);
+                // “不再询问”时记住退出程序
+                SettingsService.Update(exitModeNum: SettingsService.GetExitModeNum(SettingsService.ExitQuit));
             }
             Environment.Exit(0);
         }
@@ -26,9 +27,8 @@ namespace MultiDesktop
             Close();
             if (checkbox1.Checked)
             {
-                AppSettingsManager.AppSettings.Rows.Find("ExitMode")?["Value"] = 1;
-                AppSettingsManager.AppSettings.WriteXml(AppPaths.AppSettings, System.Data.XmlWriteMode.WriteSchema);
-
+                // “不再询问”时记住最小化到后台
+                SettingsService.Update(exitModeNum: SettingsService.GetExitModeNum(SettingsService.ExitMinimize));
             }
         }
 
