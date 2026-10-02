@@ -2,13 +2,13 @@
 
 **为工作、学习和生活，切换不同的 Windows 桌面文件夹。**
 
-[快速开始](#快速开始) · [命令行使用](#命令行使用) · [加密安全说明](#加密安全说明) · [源码构建](#源码构建) · [发行页面](https://github.com/Qibowen2008/MultiDesktop/releases)
+[快速开始](#快速开始) · [命令行使用](#-cli-命令行) · [加密安全说明](#加密安全说明) · [源码构建](#源码构建) · [发行页面](https://github.com/Qibowen2008/MultiDesktop/releases)
 
 > **项目定位：** MultiDesktop 切换的是当前用户的 Windows 桌面目录及可选壁纸，不是 `Win + Tab` 中的应用窗口工作区，也不是虚拟机或隔离沙箱。运行中的应用不会被隔离。
 
 ![多桌面切换主界面](pics/1.png)
 
-一款基于 **C# / .NET 10 / Windows Forms** 的本地桌面管理工具。将工作文件、学习资料和娱乐快捷方式分别保存在不同文件夹，通过主窗口或系统托盘切换桌面内容，并为不同桌面配置独立壁纸。
+一款基于 **C# / .NET 10 / Windows Forms** 的本地桌面管理工具。将工作文件、学习资料和娱乐快捷方式分别保存在不同文件夹，通过主窗口、系统托盘或命令行切换桌面内容，并为不同桌面配置独立壁纸。
 
 切换优先使用 Win32 Shell API；失败时回退到修改注册表并重启资源管理器。添加配置不会自动迁移原桌面文件，公共桌面中的快捷方式仍可能显示。
 
@@ -22,8 +22,9 @@
 - **自定义壁纸**：每个桌面可设置独立的壁纸与显示方式（填充/适应/拉伸/平铺/居中/跨屏）
 - **🔒 桌面加密**：为桌面设置密码后，文件夹被压缩加密（基于后量子密码学文件加密库），切换时输入密码解锁，离开时自动重新加密
 - **系统托盘**：最小化到托盘，右键菜单快速切换桌面
-- **CLI 支持**：添加 / 删除 / 列出桌面，设置壁纸与加密均可通过命令行完成
+- **满血 CLI**：列出 / 添加 / 删除 / **切换**桌面，壁纸、加密、设置、Skills 安装全部可通过命令行完成；支持 `--json` 结构化输出与稳定退出码，适合 AI 与脚本调用
 - **深色 / 浅色主题**：跟随系统或手动切换
+- **UI 与逻辑分层**：全部业务逻辑集中在不依赖 WinForms 的核心层，GUI 与 CLI 共用同一套实现
 
 ---
 
@@ -76,6 +77,8 @@ dotnet build src/MultiDesktop/MultiDesktop.csproj -c Release
 | 显示方式 | 填充 / 适应 / 拉伸 / 平铺 / 居中 / 跨屏 |
 | 桌面加密设置 | 设置 / 修改 / 移除桌面密码 |
 
+> **桌面名称必须唯一。** 加密包 id 由桌面名称哈希生成，同名桌面会共用同一个加密包而互相覆盖，因此重名会被拒绝。
+
 ---
 
 ## 🔒 桌面加密
@@ -96,7 +99,7 @@ dotnet build src/MultiDesktop/MultiDesktop.csproj -c Release
 - **临时明文会落盘：** 压缩、解密与密码验证过程中会产生明文 ZIP 或临时解压目录，正常清理不等于安全擦除。
 - **加密包不是版本备份：** 重新加密会替换旧包，应保留独立备份，不应宣称异常情况下绝不丢失数据。
 - **谨慎改名：** 加密包 ID 依赖桌面名称。建议先移除加密，再修改名称，最后重新设置密码。
-- **优先使用 GUI 输入密码：** 命令行密码可能出现在终端历史、脚本和进程参数中。
+- **优先使用 GUI 或交互式输入密码：** 命令行密码可能出现在终端历史、脚本和进程参数中。
 
 引用加密库不代表整个应用已通过安全审计。
 
@@ -110,39 +113,105 @@ dotnet build src/MultiDesktop/MultiDesktop.csproj -c Release
 
 ### 加密流程（CLI）
 
-```bash
-# 参数语法示意；请优先在图形界面设置密码
-MultiDesktop --AddDesktop <名称> <已有文件夹路径> --SetPassword <密码>
+```powershell
+# 添加时直接加密
+MultiDesktop add --name "私密" --path "D:\Private" --password 123456
+
+# 为已有桌面设置 / 修改 / 移除密码
+MultiDesktop password --name "私密" --new 654321 --old 123456
+MultiDesktop password --name "私密" --remove --old 654321
 ```
 
 ---
 
 ## 💻 CLI 命令行
 
-### 命令行使用
+不带任何参数时启动图形界面；带参数即进入命令行模式。**GUI 与 CLI 共用同一套核心逻辑**（`Core/`），因此行为与提示一致。
 
-不提供任何参数时默认启动 GUI 模式。在 PowerShell 的程序目录下运行时，使用 `.\MultiDesktop.exe`。
+### 命令一览
+
+| 命令 | 说明 |
+|---|---|
+| `list` | 列出所有已配置的桌面 |
+| `add` | 添加桌面（可选壁纸与加密） |
+| `remove` | 删除桌面配置（不删除文件夹，也不解除加密） |
+| `switch` | **切换当前桌面文件夹** |
+| `wallpaper` | 设置或取消已有桌面的自定义壁纸 |
+| `password` | 设置 / 修改 / 移除桌面加密密码 |
+| `settings` | 查看或修改应用设置 |
+| `install-skills` | 安装 SKILL.md 并把程序目录加入 PATH |
+| `help` / `version` | 帮助 / 版本号 |
+
+### 全局选项
+
+| 选项 | 说明 |
+|---|---|
+| `--json` | 以 JSON 输出结果，适合 AI 与脚本 |
+| `--quiet` | 成功时不输出提示 |
+| `--no-input` | 禁止交互式输入，缺少密码时直接失败（退出码 `5`） |
+| `--password-stdin` | 从标准输入读取一个密码 |
+| `--help` / `-h` | 显示帮助 |
+
+### 示例
 
 ```powershell
-.\MultiDesktop.exe --help
-.\MultiDesktop.exe --version
-.\MultiDesktop.exe --AddDesktop "工作" "D:\WorkDesktop"
-.\MultiDesktop.exe --ListDesktop
+# 列出（表格 / JSON / 原始 XML）
+.\MultiDesktop.exe list
+.\MultiDesktop.exe list --json
+.\MultiDesktop.exe list --xml
+
+# 添加
+.\MultiDesktop.exe add --name "工作" --path "D:\WorkDesktop"
+.\MultiDesktop.exe add --name "娱乐" --path "E:\Game" --wallpaper "D:\wall.jpg" --style 拉伸
+.\MultiDesktop.exe add --name "私密" --path "D:\Private" --password 123456
+
+# 切换
+.\MultiDesktop.exe switch --name "工作"
+.\MultiDesktop.exe switch --name "私密" --password 123456
+
+# 壁纸与密码
+.\MultiDesktop.exe wallpaper --name "工作" --wallpaper "D:\wall.jpg" --style 适应
+.\MultiDesktop.exe wallpaper --name "工作" --clear
+.\MultiDesktop.exe password --name "私密" --new 654321 --old 123456
+.\MultiDesktop.exe password --name "私密" --remove --old 654321
+
+# 设置与 Skills
+.\MultiDesktop.exe settings --color 深色 --exit-mode 询问
+.\MultiDesktop.exe install-skills
 ```
 
-目标文件夹需事先存在。`--ListDesktop` 当前输出 XML 配置内容，而不是格式化表格。`--SetBack`、`--SetStyle`、`--SetPassword` 是 `--AddDesktop` 的附加参数，应放在名称和路径后面，不是独立编辑命令。建议每次调用执行一项操作。
+`switch` 的补充选项：
 
-**当前没有独立的 CLI 桌面切换命令，切换请使用主窗口或托盘菜单。**
+| 选项 | 说明 |
+|---|---|
+| `--reencrypt-password <密码>` | 离开的加密桌面重新加密所需密码 |
+| `--no-reencrypt` | 不重新加密离开的加密桌面 |
 
-| 参数 | 说明 | 示例 |
-|---|---|---|
-| `--help` / `-h` | 显示帮助信息并退出 | `MultiDesktop --help` |
-| `--version` | 显示版本号并退出 | `MultiDesktop --version` |
-| `--AddDesktop <名称> <路径>` | 添加桌面，可选 `--SetBack <壁纸>`、`--SetStyle <显示方式>`、`--SetPassword <密码>` | `MultiDesktop --AddDesktop "工作" "D:\WorkDesktop" --SetBack "D:\wall.jpg" --SetStyle 拉伸` |
-| `--DeleteDesktop <名称>` | 删除指定桌面配置 | `MultiDesktop --DeleteDesktop "工作"` |
-| `--ListDesktop` | 列出所有已配置桌面 | `MultiDesktop --ListDesktop` |
-| `--ChangePassword <名称> <原密码> <新密码>` | 修改加密桌面的密码（原密码校验通过才执行） | `MultiDesktop --ChangePassword "私密" 123456 654321` |
-| `--RemovePassword <名称> <密码>` | 移除桌面的加密保护（需密码验证） | `MultiDesktop --RemovePassword "私密" 123456` |
+CLI 每次调用都是新进程，会话密码缓存为空。若离开的加密桌面需要重新加密而没提供 `--reencrypt-password`，**切换不会被阻塞**，但会输出警告说明该桌面文件暂为明文。
+
+### 退出码
+
+脚本与 AI 可据此稳定判断失败原因，无需解析提示文案：
+
+| 退出码 | 含义 |
+|---|---|
+| `0` | 成功 |
+| `1` | 一般错误（IO 失败、加密失败等） |
+| `2` | 参数用法错误 |
+| `3` | 桌面不存在 |
+| `4` | 密码错误 |
+| `5` | 需要密码但禁止交互 |
+| `6` | 用户取消 |
+
+### 密码输入
+
+命令行中的密码会进入终端历史、脚本与进程参数，存在泄露风险。优先级建议：
+
+1. **省略密码** → 交互式隐藏输入（回显为 `*`）
+2. **`--password-stdin`** → 从标准输入读取
+3. **`--password <密码>`** → 明文参数，仅用于可信任的本地脚本
+
+提示信息输出到标准输出，错误输出到标准错误，便于管道过滤。
 
 ---
 
@@ -173,6 +242,32 @@ MultiDesktop --AddDesktop <名称> <已有文件夹路径> --SetPassword <密码
 ---
 
 ## 🛠️ 技术实现
+
+### 架构分层
+
+业务逻辑与界面完全分离，GUI 与 CLI 是核心层的两个消费者：
+
+```
+src/MultiDesktop/
+├── Core/                        核心层：不依赖 WinForms
+│   ├── OperationResult.cs       统一结果模型 + CLI 退出码
+│   ├── AppPaths.cs              配置目录解析
+│   ├── DesktopRepository.cs     DesktopList.xml 唯一读写出口
+│   ├── DesktopService.cs        桌面增删改查、壁纸配置、当前桌面检测
+│   ├── DesktopSwitchService.cs  切换工作流 + Win32 Shell API
+│   ├── EncryptionService.cs     加解密与会话密码缓存
+│   ├── PasswordService.cs       密码设置 / 修改 / 移除用例
+│   ├── SettingsService.cs       AppSettings 读写
+│   ├── WallpaperService.cs      壁纸应用与显示方式映射
+│   ├── SkillInstaller.cs        SKILL.md 安装与 PATH 写入
+│   ├── CliArgs.cs               命令行解析
+│   └── CliRunner.cs             满血 CLI 命令调度
+├── Program.cs                   入口 + 窗体间传值的 static 中介
+├── ColorModeMap.cs              颜色模式映射（依赖 WinForms，属 UI 层）
+└── frm*.cs                      窗体：只负责收集输入与显示结果
+```
+
+**约定：** 核心层不弹任何对话框，通过 `OperationResult`（含提示文案、退出码、结构化数据）报告成功与失败；由调用方决定呈现方式 —— GUI 弹 `MessageBox`，CLI 打印文本或输出 JSON。密码由调用方收集后作为参数传入，核心层不主动询问。
 
 ### 桌面切换
 
@@ -205,10 +300,13 @@ MultiDesktop --AddDesktop <名称> <已有文件夹路径> --SetPassword <密码
  dotnet build src/MultiDesktop/MultiDesktop.csproj -c Release
 
 # 启动 GUI；实际操作会修改桌面设置
- dotnet run --project src/MultiDesktop/MultiDesktop.csproj
+dotnet run --project src/MultiDesktop/MultiDesktop.csproj
+
+# 命令行模式（任何参数都会进入 CLI）
+dotnet run --project src/MultiDesktop/MultiDesktop.csproj -- list --json
 
 # Windows x64 自包含发布示例
- dotnet publish src/MultiDesktop/MultiDesktop.csproj -c Release -r win-x64 --self-contained true -o publish/local-win-x64
+dotnet publish src/MultiDesktop/MultiDesktop.csproj -c Release -r win-x64 --self-contained true -o publish/local-win-x64
 ```
 
 常规 Release 输出目录为 `src/MultiDesktop/bin/Release/net10.0-windows/`。
@@ -219,16 +317,18 @@ MultiDesktop --AddDesktop <名称> <已有文件夹路径> --SetPassword <密码
 
 | 文件（相对 `src/MultiDesktop/`） | 主要职责 |
 | --- | --- |
-| `Program.cs` | 启动、CLI、配置路径、桌面和壁纸切换、加解密 |
-| `frmMain.cs` | 桌面列表、切换工作流与托盘交互 |
+| `Program.cs` | 启动、CLI 与 GUI 分流、窗体间传值的 static 中介 |
+| `Core/CliRunner.cs` | 全部 CLI 命令与输出格式 |
+| `Core/DesktopSwitchService.cs` | 切换工作流（含离开桌面自动重新加密） |
+| `Core/PasswordService.cs` | 密码设置 / 修改 / 移除 |
+| `Core/EncryptionService.cs` | 压缩加密、解密还原、密码校验 |
+| `frmMain.cs` | 桌面列表、切换工作流与托盘交互（只做 UI） |
 | `frmAddDesktop.cs` | 添加和编辑桌面 |
 | `frmPassword.cs` | 设置、修改和移除密码 |
 | `frmInputPassword.cs` | 解锁密码输入 |
 | `frmSet.cs` / `frmClose.cs` | 设置与关闭行为 |
 | `frmAbout.cs` | 关于窗口 |
 | `*.Designer.cs` | 对应窗体布局 |
-
-`Program.cs` 中的核心类包括 `AppPaths`、`DesktopManager`、`AppSettingsManager` 和 `EncryptManager`。
 
 ### 迁移与问题反馈
 
