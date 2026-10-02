@@ -6,7 +6,7 @@
 
 > **项目定位：** MultiDesktop 切换的是当前用户的 Windows 桌面目录及可选壁纸，不是 `Win + Tab` 中的应用窗口工作区，也不是虚拟机或隔离沙箱。运行中的应用不会被隔离。
 
-![多桌面切换主界面](https://raw.githubusercontent.com/Buger2008/MultiDesktop/net10rebuild/pics/1.png)
+![多桌面切换主界面](pics/1.png)
 
 一款基于 **C# / .NET 10 / Windows Forms** 的本地桌面管理工具。将工作文件、学习资料和娱乐快捷方式分别保存在不同文件夹，通过主窗口或系统托盘切换桌面内容，并为不同桌面配置独立壁纸。
 
