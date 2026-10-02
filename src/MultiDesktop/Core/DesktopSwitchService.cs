@@ -1,7 +1,3 @@
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-using Microsoft.Win32;
-
 namespace MultiDesktop.Core
 {
     /// <summary>切换前需要向用户索取哪些密码。</summary>
@@ -26,25 +22,21 @@ namespace MultiDesktop.Core
     /// 桌面文件夹切换与“离开加密桌面自动重新加密”的完整工作流。
     /// 不依赖 WinForms：密码由调用方收集后传入，密码错误以 BadPassword 返回。
     /// GUI 与 CLI 共用本模块，保证两边行为一致。
+    ///
+    /// 具体的目录切换动作是平台相关的，交由 <see cref="IDesktopPlatform"/> 实现；
+    /// 加解密、密码校验、会话缓存等部分与平台无关，在本类中统一处理。
     /// </summary>
     public static class DesktopSwitchService
     {
-        // 桌面文件夹的 Known Folder GUID
-        private static readonly Guid FOLDERID_Desktop =
-            new("{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}");
+        // ==================================================================
+        //  平台能力
+        // ==================================================================
 
-        private const uint KF_FLAG_NO_FLAGS = 0x00000000;  // 写注册表 + 立即通知 Shell 刷新
+        /// <summary>当前平台是否已实现桌面切换（目前仅 Windows）。</summary>
+        public static bool IsPlatformSupported => DesktopPlatform.Current.IsSupported;
 
-        private const uint SHCNE_ASSOCCHANGED = 0x08000000;
-        private const uint SHCNF_FLUSH = 0x1000;
-
-        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-        private static extern int SHSetKnownFolderPath(
-            ref Guid rfid, uint dwFlags, IntPtr hToken, string pszPath);
-
-        [DllImport("shell32.dll")]
-        private static extern void SHChangeNotify(
-            uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+        /// <summary>当前平台名称。</summary>
+        public static string PlatformName => DesktopPlatform.Current.Name;
 
         // ==================================================================
         //  当前激活桌面（会话内状态，用于离开加密桌面时自动重新加密）
@@ -92,10 +84,15 @@ namespace MultiDesktop.Core
         /// <summary>
         /// 执行切换：解锁目标桌面 → 切换目录与壁纸 → 重新加密离开的加密桌面 → 记录当前桌面。
         /// 密码错误返回 BadPassword（不做任何状态变更，调用方可重新询问）。
+        /// 平台未实现时直接返回失败，不会询问密码。
         /// </summary>
         public static async Task<SwitchOutcome> SwitchToAsync(
             DesktopInfo target, SwitchRequirements req, string? targetPassword, string? leavingPassword)
         {
+            // 平台能力检查放在最前：不支持的平台上不必先让用户输密码再失败
+            if (!IsPlatformSupported)
+                return new SwitchOutcome(false, PlatformInfo.UnsupportedDesktopSwitchMessage(PlatformName));
+
             if (string.IsNullOrEmpty(target.Path))
                 return new SwitchOutcome(false, "错误: 桌面路径为空");
 
@@ -170,7 +167,7 @@ namespace MultiDesktop.Core
         }
 
         // ==================================================================
-        //  底层切换原语
+        //  底层切换原语（平台相关，委托给 IDesktopPlatform）
         // ==================================================================
 
         public static void ChangeDesktopPath(string newPath)
@@ -190,49 +187,9 @@ namespace MultiDesktop.Core
         /// <summary>
         /// 切换桌面文件夹路径，并可选设置壁纸及显示方式。
         /// wallpaperPath 为 null 时仅切换目录，不修改壁纸。
+        /// 平台未实现时抛出 <see cref="PlatformNotSupportedException"/>。
         /// </summary>
         public static void ChangeDesktopPath(string newPath, string? wallpaperPath, string? wallpaperStyle)
-        {
-            // 确保目标目录存在
-            if (!Directory.Exists(newPath))
-                Directory.CreateDirectory(newPath);
-
-            // 设置了壁纸路径则立即应用
-            if (!string.IsNullOrEmpty(wallpaperPath) && File.Exists(wallpaperPath))
-                WallpaperService.Apply(wallpaperPath, wallpaperStyle);
-
-            // 方案一（优先）：SHSetKnownFolderPath —— 无感切换
-            var guid = FOLDERID_Desktop;
-            int hr = SHSetKnownFolderPath(ref guid, KF_FLAG_NO_FLAGS, IntPtr.Zero, newPath);
-
-            if (hr == 0) // S_OK
-            {
-                // 双重保险：再发一次 Shell 刷新通知
-                SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_FLUSH, IntPtr.Zero, IntPtr.Zero);
-                return;
-            }
-
-            // 方案二（回退）：改注册表 + 重启 explorer
-            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders", true))
-            {
-                if (key == null)
-                    throw new Exception("无法打开注册表项");
-                key.SetValue("Desktop", newPath, RegistryValueKind.ExpandString);
-            }
-
-            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders", true))
-            {
-                if (key != null)
-                    key.SetValue("Desktop", newPath, RegistryValueKind.ExpandString);
-            }
-            foreach (Process process in Process.GetProcessesByName("explorer"))
-            {
-                process.Kill();
-            }
-            System.Threading.Thread.Sleep(1000);
-            Process.Start("explorer.exe");
-        }
+            => DesktopPlatform.Current.SwitchDesktop(newPath, wallpaperPath, wallpaperStyle);
     }
 }

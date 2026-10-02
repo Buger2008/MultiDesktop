@@ -285,24 +285,40 @@ MultiDesktop settings --color 深色 --exit-mode 询问
 
 ```
 Core/OperationResult.cs        统一结果模型 + 退出码
+Core/JsonBuffer.cs             零反射 JSON 输出（AOT 安全）
 Core/AppPaths.cs               配置目录解析
 Core/DesktopRepository.cs      DesktopList.xml 唯一读写出口
 Core/DesktopService.cs         桌面增删改查、壁纸配置、当前桌面检测
-Core/DesktopSwitchService.cs   切换工作流 + Win32 Shell API
+Core/DesktopSwitchService.cs   切换工作流（解锁 → 切换 → 重新加密）
 Core/EncryptionService.cs      加解密与会话密码缓存
 Core/PasswordService.cs        密码设置 / 修改 / 移除
 Core/SettingsService.cs        AppSettings 读写
-Core/WallpaperService.cs       壁纸应用
+Core/WallpaperService.cs       显示方式取值与校验（平台无关）
 Core/SkillInstaller.cs         SKILL.md 安装与 PATH 写入
 Core/CliArgs.cs / CliRunner.cs 命令行解析与调度
+Core/Platform/                 平台相关实现（唯一调用系统 API 的地方）
+    PlatformInfo / IDesktopPlatform / DesktopPlatform
+    WindowsDesktopPlatform（已实现）
+    MacDesktopPlatform / LinuxDesktopPlatform（预留，含落地思路）
 ```
 
-### 桌面切换机制
+### 平台支持
+
+**桌面切换与壁纸设置目前仅实现 Windows。** 系统调用全部收拢在 `Core/Platform/` 下，Core 其余部分与平台无关。
+
+- 在 macOS / Linux 上调用 `switch` 会返回明确提示（`success: false`，退出码 `1`），而不是抛出底层异常；
+- 该检查发生在**要求输入密码之前**，所以不会让用户白输一次密码；
+- `add` / `remove` / `list` / `password` / `settings` 等不涉及桌面切换的命令在原理上与平台无关（但当前项目目标框架为 `net10.0-windows`，GUI 无法在其他平台运行）；
+- 新增平台只需实现 `IDesktopPlatform` 并在 `DesktopPlatform.Create()` 中登记。
+
+### 桌面切换机制（Windows）
 
 1. **优先方案**：通过 `SHSetKnownFolderPath(FOLDERID_Desktop, ...)` 修改桌面文件夹路径，无需重启 explorer。
 2. **回退方案**：修改注册表键值
    - `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders\Desktop`
    - `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders\Desktop`
+
+实现在 `Core/Platform/WindowsDesktopPlatform.cs`；macOS / Linux 尚未实现，见上文「平台支持」。
 
 ### 壁纸设置
 

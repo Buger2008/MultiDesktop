@@ -249,23 +249,35 @@ CLI 每次调用都是新进程，会话密码缓存为空。若离开的加密�
 
 ```
 src/MultiDesktop/
-├── Core/                        核心层：不依赖 WinForms
-│   ├── OperationResult.cs       统一结果模型 + CLI 退出码
-│   ├── AppPaths.cs              配置目录解析
-│   ├── DesktopRepository.cs     DesktopList.xml 唯一读写出口
-│   ├── DesktopService.cs        桌面增删改查、壁纸配置、当前桌面检测
-│   ├── DesktopSwitchService.cs  切换工作流 + Win32 Shell API
-│   ├── EncryptionService.cs     加解密与会话密码缓存
-│   ├── PasswordService.cs       密码设置 / 修改 / 移除用例
-│   ├── SettingsService.cs       AppSettings 读写
-│   ├── WallpaperService.cs      壁纸应用与显示方式映射
-│   ├── SkillInstaller.cs        SKILL.md 安装与 PATH 写入
-│   ├── CliArgs.cs               命令行解析
-│   └── CliRunner.cs             满血 CLI 命令调度
-├── Program.cs                   入口 + 窗体间传值的 static 中介
-├── ColorModeMap.cs              颜色模式映射（依赖 WinForms，属 UI 层）
-└── frm*.cs                      窗体：只负责收集输入与显示结果
+├── Core/                          核心层：不依赖 WinForms
+│   ├── OperationResult.cs         统一结果模型 + CLI 退出码
+│   ├── JsonBuffer.cs              零反射 JSON 输出（AOT 安全）
+│   ├── AppPaths.cs                配置目录解析
+│   ├── DesktopRepository.cs       DesktopList.xml 唯一读写出口
+│   ├── DesktopService.cs          桌面增删改查、壁纸配置、当前桌面检测
+│   ├── DesktopSwitchService.cs    切换工作流（解锁 → 切换 → 重新加密）
+│   ├── EncryptionService.cs       加解密与会话密码缓存
+│   ├── PasswordService.cs         密码设置 / 修改 / 移除用例
+│   ├── SettingsService.cs         AppSettings 读写
+│   ├── WallpaperService.cs        显示方式取值与校验（平台无关）
+│   ├── SkillInstaller.cs          SKILL.md 安装与 PATH 写入
+│   ├── CliArgs.cs                 命令行解析
+│   ├── CliRunner.cs               满血 CLI 命令调度
+│   └── Platform/                  平台相关实现（唯一允许调用系统 API 的地方）
+│       ├── PlatformInfo.cs            平台判定与提示文案
+│       ├── IDesktopPlatform.cs        平台实现接口
+│       ├── DesktopPlatform.cs         按运行平台选择实现
+│       ├── WindowsDesktopPlatform.cs  Windows：Shell API + 注册表 + 壁纸
+│       ├── MacDesktopPlatform.cs      macOS：预留（类注释含落地思路）
+│       └── LinuxDesktopPlatform.cs    Linux：预留（类注释含落地思路）
+├── Program.cs                     入口 + 窗体间传值的 static 中介
+├── ColorModeMap.cs                颜色映射（依赖 WinForms，属 UI 层）
+└── frm*.cs                        窗体：只负责收集输入与显示结果
 ```
+
+**平台支持：** 桌面文件夹切换与壁纸设置目前**仅实现 Windows**。相关系统调用（Shell API、注册表、`SystemParametersInfo`）已全部收拢在 `Core/Platform/` 下，Core 的其余部分与平台无关。
+
+macOS 与 Linux 预留了实现位（`MacDesktopPlatform` / `LinuxDesktopPlatform`，类注释中写明了落地思路：macOS 走 `~/Desktop` 符号链接 + `osascript` 壁纸；Linux 走 `xdg-user-dirs-update` + 按桌面环境分支的 `gsettings` / `plasma-apply-wallpaperimage`）。在这两个平台上调用 `switch` 会得到明确提示而非底层异常，并且会在要求输入密码**之前**就失败。新增平台只需实现 `IDesktopPlatform` 并在 `DesktopPlatform.Create()` 中登记。
 
 **约定：** 核心层不弹任何对话框，通过 `OperationResult`（含提示文案、退出码、结构化数据）报告成功与失败；由调用方决定呈现方式 —— GUI 弹 `MessageBox`，CLI 打印文本或输出 JSON。密码由调用方收集后作为参数传入，核心层不主动询问。
 

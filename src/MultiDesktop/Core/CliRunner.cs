@@ -375,6 +375,11 @@ namespace MultiDesktop.Core
             string? name = a.Get("--name");
             if (string.IsNullOrWhiteSpace(name)) return Emit(a, OperationResult.Fail("缺少必填选项 --name", ExitCodes.Usage));
 
+            // 平台能力检查放在最前：不支持的平台上先失败，不必让用户白输一次密码
+            if (!DesktopSwitchService.IsPlatformSupported)
+                return Emit(a, OperationResult.Fail(
+                    PlatformInfo.UnsupportedDesktopSwitchMessage(DesktopSwitchService.PlatformName)));
+
             var target = DesktopService.List()
                 .FirstOrDefault(d => string.Equals(d.Name, name, StringComparison.Ordinal));
             if (target == null)
